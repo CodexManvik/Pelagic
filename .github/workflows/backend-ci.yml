@@ -1,0 +1,90 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+jobs:
+  quality-and-tests:
+    name: Quality and Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            data-pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install -r data-pipeline/requirements.txt
+          pip install ruff mypy pytest pytest-asyncio pytest-cov
+
+      - name: Ruff lint
+        run: ruff check backend data-pipeline
+
+      - name: Ruff formatting check
+        run: ruff format --check backend data-pipeline
+
+      - name: Mypy strict type check
+        run: mypy --strict backend data-pipeline
+
+      - name: Pytest with coverage gate (>=80%)
+        run: |
+          pytest \
+            --asyncio-mode=auto \
+            --cov=backend \
+            --cov=data-pipeline \
+            --cov-report=term-missing \
+            --cov-fail-under=80
+
+      - name: Ensure Dockerfile exists for Trivy scan
+        run: |
+          if [ -f "backend/Dockerfile" ]; then
+            echo "dockerfile_path=backend/Dockerfile" >> "$GITHUB_ENV"
+          elif [ -f "Dockerfile" ]; then
+            echo "dockerfile_path=Dockerfile" >> "$GITHUB_ENV"
+          else
+            echo "No Dockerfile found at backend/Dockerfile or ./Dockerfile"
+            exit 1
+          fi
+
+      - name: Trivy scan Dockerfile
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: config
+          scan-ref: ${{ env.dockerfile_path }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
+        with:
+          args: >
+            -Dsonar.organization=${{ github.repository_owner }}
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
+            -Dsonar.sources=backend,data-pipeline

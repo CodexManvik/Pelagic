@@ -1,0 +1,10 @@
+project_id         = "your-gcp-project-id"
+region             = "us-central1"
+cloud_run_service_name = "leviathan-backend"
+backend_image      = "us-central1-docker.pkg.dev/your-gcp-project-id/leviathan/backend:latest"
+github_repository  = "your-github-org/FloatChat-AI"
+
+database_url               = "postgresql://<user>:<password>@<host>/<db>?sslmode=require"
+qstash_token               = "replace-with-qstash-token"
+qstash_current_signing_key = "replace-with-qstash-current-signing-key"
+groq_api_key               = "replace-with-groq-api-key"
