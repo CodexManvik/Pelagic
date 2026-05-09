@@ -10,8 +10,8 @@
 
 ### Ingestion Flow
 1. Producer fetches ARGO updates.
-2. Batch publish to Upstash Kafka (or QStash webhook fallback).
-3. Consumer validates + dedupes + upserts.
+2. Batch publish to QStash webhook target.
+3. Webhook validates + Redis dedupe + upserts.
 4. TTL cleanup and daily summaries run on schedule.
 
 ## Log Correlation
@@ -40,5 +40,5 @@
 
 ## Environment Matrix
 - Local dev: `.env` + local DB or Neon.
-- Demo: Neon + Upstash Kafka + Groq + Langfuse.
+- Demo: Neon + QStash + Upstash Redis + Groq + Langfuse.
 - CI: SQLite (unit) + mocked LLM.

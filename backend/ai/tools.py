@@ -11,6 +11,13 @@ Tables:
 - floats(float_id, wmo_id, deployment_date)
 - profiles(profile_id, float_id, cycle_number, profile_date, lat, lon)
 - measurements(id, profile_id, depth, temperature, salinity, oxygen)
+
+Relationships:
+- profiles.float_id -> floats.float_id
+- measurements.profile_id -> profiles.profile_id
+
+Notes:
+- profile_date lives on profiles; join profiles when filtering by time.
 """.strip()
 
 

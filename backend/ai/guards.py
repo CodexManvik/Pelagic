@@ -19,7 +19,18 @@ def validate_sql(sql: str, allowed_tables: set[str]) -> GuardResult:
     except sqlglot.errors.ParseError as exc:
         return GuardResult(False, f"SQL parse failed: {exc}", [])
 
-    blocked = (exp.Delete, exp.Drop, exp.Update, exp.Insert, exp.Alter, exp.Create, exp.Truncate)
+    blocked_names = [
+        "Delete",
+        "Drop",
+        "Update",
+        "Insert",
+        "Alter",
+        "Create",
+        "Truncate",
+    ]
+    blocked = tuple(
+        getattr(exp, name) for name in blocked_names if hasattr(exp, name)
+    )
     tables: set[str] = set()
 
     for node in parsed.walk():

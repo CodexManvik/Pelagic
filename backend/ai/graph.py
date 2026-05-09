@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, StateGraph
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai.guards import validate_sql
@@ -75,14 +76,23 @@ async def validate_node(state: GraphState) -> dict[str, Any]:
 async def execute_node(state: GraphState) -> dict[str, Any]:
     if not state.get("sql_plan"):
         raise RuntimeError("SQL plan missing.")
-
-    rows = await execute_sql(
-        session=state["session"],
-        sql=state["sql_plan"].sql,
-        params=state["sql_plan"].params,
-        max_rows=state["max_rows"],
-    )
-    return {"rows": rows}
+    try:
+        rows = await execute_sql(
+            session=state["session"],
+            sql=state["sql_plan"].sql,
+            params=state["sql_plan"].params,
+            max_rows=state["max_rows"],
+        )
+        return {"rows": rows, "errors": []}
+    except SQLAlchemyError as exc:
+        errors = list(state.get("errors", []))
+        error_text = str(exc)
+        errors.append(f"SQL execution failed: {exc.__class__.__name__}: {exc}")
+        if "INTERVAL" in error_text or "syntax error at or near \"$" in error_text:
+            errors.append(
+                "Postgres cannot parameterize INTERVAL literals. Use make_interval(days => :time_window_days)."
+            )
+        return {"rows": [], "errors": errors}
 
 
 async def interpret_node(state: GraphState) -> dict[str, Any]:
@@ -127,6 +137,15 @@ def _next_after_validation(state: GraphState) -> str:
     return "execute"
 
 
+def _next_after_execute(state: GraphState) -> str:
+    settings = get_settings()
+    if state.get("errors"):
+        if state.get("attempt", 0) < settings.sql_max_retries:
+            return "repair"
+        return "end"
+    return "interpret"
+
+
 @lru_cache(maxsize=1)
 def build_query_graph() -> Any:
     graph = StateGraph(GraphState)
@@ -147,7 +166,11 @@ def build_query_graph() -> Any:
         {"repair": "repair", "execute": "execute", "end": END},
     )
     graph.add_edge("repair", "validate")
-    graph.add_edge("execute", "interpret")
+    graph.add_conditional_edges(
+        "execute",
+        _next_after_execute,
+        {"repair": "repair", "interpret": "interpret", "end": END},
+    )
     graph.add_edge("interpret", END)
 
     return graph.compile()

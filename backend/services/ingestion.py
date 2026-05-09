@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import get_settings
 from db.models import Float, Measurement, Profile
 from schemas.ingestion import ArgoMeasurementPayload
+from upstash_redis import Redis
+
+
+logger = logging.getLogger("argo-ingestion")
 
 
 def decode_payload(raw_body: str) -> list[ArgoMeasurementPayload]:
@@ -34,6 +41,57 @@ def dedupe_measurements(
     return list(deduped.values())
 
 
+def _build_redis_client() -> Redis | None:
+    settings = get_settings()
+    if not settings.upstash_redis_rest_url or not settings.upstash_redis_rest_token:
+        return None
+    return Redis(
+        url=settings.upstash_redis_rest_url,
+        token=settings.upstash_redis_rest_token,
+    )
+
+
+def _redis_set_is_new(result: object) -> bool:
+    if result is True:
+        return True
+    if isinstance(result, str) and result.lower() == "ok":
+        return True
+    if isinstance(result, int) and result == 1:
+        return True
+    return False
+
+
+async def _dedupe_with_redis(
+    events: list[ArgoMeasurementPayload],
+) -> list[ArgoMeasurementPayload]:
+    redis = _build_redis_client()
+    if not redis:
+        return events
+
+    settings = get_settings()
+    ttl_seconds = max(1, settings.measurement_ttl_days) * 24 * 60 * 60
+    deduped: list[ArgoMeasurementPayload] = []
+
+    for event in events:
+        key = f"argo:dedupe:{event.float_id}:{event.cycle_number}:{event.depth}"
+        try:
+            result = await asyncio.to_thread(
+                redis.set,
+                key,
+                "1",
+                ex=ttl_seconds,
+                nx=True,
+            )
+        except Exception:
+            logger.exception("Redis dedupe failed; proceeding without cache.")
+            return events
+
+        if _redis_set_is_new(result):
+            deduped.append(event)
+
+    return deduped
+
+
 async def persist_events(
     session: AsyncSession,
     events: list[ArgoMeasurementPayload],
@@ -42,6 +100,9 @@ async def persist_events(
         return
 
     deduped_events = dedupe_measurements(events)
+    deduped_events = await _dedupe_with_redis(deduped_events)
+    if not deduped_events:
+        return
     now_utc = datetime.now(UTC)
 
     float_rows_by_id: dict[str, dict[str, Any]] = {}

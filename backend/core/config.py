@@ -42,6 +42,13 @@ class Settings(BaseSettings):
         default=None, alias="QSTASH_NEXT_SIGNING_KEY"
     )
     qstash_target_url: str | None = Field(default=None, alias="QSTASH_TARGET_URL")
+
+    upstash_redis_rest_url: str | None = Field(
+        default=None, alias="UPSTASH_REDIS_REST_URL"
+    )
+    upstash_redis_rest_token: str | None = Field(
+        default=None, alias="UPSTASH_REDIS_REST_TOKEN"
+    )
     _root_env_path = Path(__file__).resolve().parents[2] / ".env"
 
     model_config = SettingsConfigDict(

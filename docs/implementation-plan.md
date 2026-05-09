@@ -20,8 +20,8 @@
 
 ### Phase 1: Ingestion Pipeline (Days 6-14)
 - Producer: ARGO poller (index fetch + minimal measurements) with batching.
-- Transport: Upstash Kafka producer and consumer; QStash webhook fallback for local dev.
-- Consumer: idempotent upserts, dedupe, and replay support.
+- Transport: QStash webhook delivery for batch events.
+- Consumer: idempotent upserts with Redis-backed dedupe and replay support.
 - TTL cleanup job and daily summary rollup job.
 
 ### Phase 2: AI Orchestration (Days 15-24)
@@ -75,7 +75,6 @@ backend/
     summaries.py
     embeddings.py
   worker/
-    kafka_consumer.py
     cleanup.py
     embedding_worker.py
   prompts/
@@ -91,8 +90,8 @@ backend/
 
 data-pipeline/
   argo_fetcher.py
-  producer_kafka.py
-  producer_qstash.py
+  argo_events.py
+  producer.py
   requirements.txt
 
 frontend/
@@ -105,8 +104,8 @@ frontend/
 ## Environment Variables (Key)
 - `DATABASE_URL`, `APP_NAME`, `ENVIRONMENT`
 - `GROQ_API_KEY`, `GROQ_MODEL`
-- `UPSTASH_KAFKA_BROKERS`, `UPSTASH_KAFKA_USERNAME`, `UPSTASH_KAFKA_PASSWORD`
 - `QSTASH_TOKEN`, `QSTASH_TARGET_URL`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`
 
 ## Acceptance Criteria (Internal)
