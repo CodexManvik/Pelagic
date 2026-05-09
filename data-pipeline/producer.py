@@ -23,7 +23,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(dotenv_path=ROOT_DIR / ".env")
 
 DEFAULT_TARGET_URL = "http://localhost:8000/api/webhooks/argo-ingest"
-DEFAULT_BATCH_SIZE = 500
+DEFAULT_BATCH_SIZE = 100
 DEFAULT_MAX_PROFILES = 50
 DEFAULT_PROFILE_CACHE_TTL_DAYS = 7
 DEFAULT_PROFILE_CACHE_PREFIX = "argo:profile"

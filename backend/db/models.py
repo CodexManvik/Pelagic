@@ -124,3 +124,20 @@ class Embedding(Base):
     source_id: Mapped[str] = mapped_column(String(64), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     vector: Mapped[list[float]] = mapped_column(Vector(768))
+
+
+class ActiveFloatSummary(Base):
+    """Read-only view of active floats aggregated by basin."""
+
+    __tablename__ = "active_floats_summary"
+    __table_args__ = {"info": {"is_view": True}}
+
+    basin: Mapped[str] = mapped_column(String(32), primary_key=True)
+    active_float_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    measurement_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_temperature: Mapped[Optional[float]] = mapped_column(SqlFloat, nullable=True)
+    avg_salinity: Mapped[Optional[float]] = mapped_column(SqlFloat, nullable=True)
+    last_profile_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )

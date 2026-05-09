@@ -97,4 +97,9 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(Base.metadata.create_all)
+        tables = [
+            table
+            for table in Base.metadata.sorted_tables
+            if not table.info.get("is_view")
+        ]
+        await conn.run_sync(Base.metadata.create_all, tables=tables)

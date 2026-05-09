@@ -24,6 +24,13 @@ def decode_payload(raw_body: str) -> list[ArgoMeasurementPayload]:
     if not isinstance(parsed, list):
         raise ValueError("Payload must be a JSON list of objects.")
 
+    # Allow batched envelopes like [[{...}, {...}], [{...}]] and flatten once.
+    if parsed and all(isinstance(item, list) for item in parsed):
+        flattened: list[object] = []
+        for batch in parsed:
+            flattened.extend(batch)
+        parsed = flattened
+
     records = [item for item in parsed if isinstance(item, dict)]
     if len(records) != len(parsed):
         raise ValueError("All payload items must be JSON objects.")
@@ -167,14 +174,24 @@ async def persist_events(
         for event in deduped_events
     ]
 
-    if measurement_rows:
-        measurement_insert = pg_insert(Measurement).values(measurement_rows)
-        measurement_upsert = measurement_insert.on_conflict_do_update(
-            index_elements=[Measurement.profile_id, Measurement.depth],
-            set_={
-                "temperature": measurement_insert.excluded.temperature,
-                "salinity": measurement_insert.excluded.salinity,
-                "oxygen": measurement_insert.excluded.oxygen,
-            },
-        )
-        await session.execute(measurement_upsert)
+    await _upsert_measurements(session, measurement_rows)
+
+
+async def _upsert_measurements(
+    session: AsyncSession,
+    measurement_rows: list[dict[str, Any]],
+) -> None:
+    if not measurement_rows:
+        return
+
+    # Single bulk INSERT ... ON CONFLICT for all measurements in the webhook batch.
+    measurement_insert = pg_insert(Measurement).values(measurement_rows)
+    measurement_upsert = measurement_insert.on_conflict_do_update(
+        index_elements=[Measurement.profile_id, Measurement.depth],
+        set_={
+            "temperature": measurement_insert.excluded.temperature,
+            "salinity": measurement_insert.excluded.salinity,
+            "oxygen": measurement_insert.excluded.oxygen,
+        },
+    )
+    await session.execute(measurement_upsert)

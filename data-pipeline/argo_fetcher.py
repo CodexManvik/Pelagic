@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import ssl
 import urllib.request
 from collections import deque
 from datetime import UTC, datetime
@@ -17,6 +18,25 @@ logger = logging.getLogger("argo-fetcher")
 
 
 INDEX_FLOAT_PATTERN = re.compile(r"(?P<float>\d{5,8})_(?P<cycle>\d{3})")
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    skip_tls_verify = os.getenv("ARGO_SKIP_TLS_VERIFY", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if skip_tls_verify:
+        logger.warning("ARGO_SKIP_TLS_VERIFY is enabled; TLS verification is disabled.")
+        return ssl._create_unverified_context()
+
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def build_redis_client() -> Redis | None:
@@ -44,7 +64,8 @@ def fetch_index_lines(url: str, max_lines: int) -> list[str]:
     )
 
     buffer: deque[str] = deque(maxlen=max_lines)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    context = _build_ssl_context()
+    with urllib.request.urlopen(request, timeout=30, context=context) as response:
         for raw_line in response:
             line = raw_line.decode("utf-8", errors="ignore").strip()
             if not line or line.startswith("#"):
@@ -75,6 +96,18 @@ def _parse_date(value: str | None) -> str | None:
     return parsed.replace(tzinfo=UTC).isoformat()
 
 
+def _parse_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def parse_profile_hint(line: str) -> ArgoProfileHint | None:
     parts = [part.strip() for part in line.split(",") if part.strip()]
     if not parts:
@@ -87,11 +120,15 @@ def parse_profile_hint(line: str) -> ArgoProfileHint | None:
     float_id = f"ARGO-{match.group('float')}"
     cycle_number = int(match.group("cycle"))
     profile_date = _parse_date(parts[1] if len(parts) > 1 else None)
+    lat = _parse_float(parts[2] if len(parts) > 2 else None)
+    lon = _parse_float(parts[3] if len(parts) > 3 else None)
 
     return ArgoProfileHint(
         float_id=float_id,
         cycle_number=cycle_number,
         profile_date=profile_date,
+        lat=lat,
+        lon=lon,
     )
 
 

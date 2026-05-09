@@ -8,7 +8,7 @@ from langgraph.graph import END, StateGraph
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai.guards import validate_sql
+from ai.guards import check_query_cost, validate_sql
 from ai.llm import build_chat_model
 from ai.schemas import OceanographerAnswer, RouterDecision, SqlPlan
 from ai.tools import SCHEMA_CONTEXT, execute_sql
@@ -31,7 +31,9 @@ class GraphState(TypedDict):
 
 def _allowed_tables() -> set[str]:
     settings = get_settings()
-    return {table.strip() for table in settings.sql_allowlist_tables.split(",") if table}
+    configured = {table.strip() for table in settings.sql_allowlist_tables.split(",") if table}
+    configured.add("active_floats_summary")
+    return configured
 
 
 async def route_node(state: GraphState) -> dict[str, Any]:
@@ -47,7 +49,14 @@ async def route_node(state: GraphState) -> dict[str, Any]:
 async def sql_node(state: GraphState) -> dict[str, Any]:
     prompt = load_prompt("sql_engineer.md")
     template = ChatPromptTemplate.from_messages(
-        [("system", prompt), ("human", "{question}")]
+        [
+            ("system", prompt),
+            (
+                "system",
+                "Prefer active_floats_summary for basin-level aggregates when it can answer the question.",
+            ),
+            ("human", "{question}"),
+        ]
     )
     router_data = state["router"].model_dump() if state["router"] else {}
     chain = template | build_chat_model().with_structured_output(SqlPlan)
@@ -63,24 +72,38 @@ async def sql_node(state: GraphState) -> dict[str, Any]:
 
 
 async def validate_node(state: GraphState) -> dict[str, Any]:
-    if not state.get("sql_plan"):
+    sql_plan = state.get("sql_plan")
+    if sql_plan is None:
         return {"errors": ["SQL plan missing."]}
 
-    guard = validate_sql(state["sql_plan"].sql, _allowed_tables())
+    guard = validate_sql(sql_plan.sql, _allowed_tables())
     if not guard.ok:
         errors = list(state.get("errors", [])) + [guard.reason or "SQL rejected"]
+        return {"errors": errors}
+    settings = get_settings()
+    cost_result = await check_query_cost(
+        session=state["session"],
+        sql=sql_plan.sql,
+        params=sql_plan.params,
+        max_cost=settings.sql_max_cost,
+    )
+    if not cost_result.ok:
+        errors = list(state.get("errors", [])) + [
+            cost_result.reason or "Query cost exceeds free-tier limit."
+        ]
         return {"errors": errors}
     return {"errors": []}
 
 
 async def execute_node(state: GraphState) -> dict[str, Any]:
-    if not state.get("sql_plan"):
+    sql_plan = state.get("sql_plan")
+    if sql_plan is None:
         raise RuntimeError("SQL plan missing.")
     try:
         rows = await execute_sql(
             session=state["session"],
-            sql=state["sql_plan"].sql,
-            params=state["sql_plan"].params,
+            sql=sql_plan.sql,
+            params=sql_plan.params,
             max_rows=state["max_rows"],
         )
         return {"rows": rows, "errors": []}
@@ -100,11 +123,12 @@ async def interpret_node(state: GraphState) -> dict[str, Any]:
     template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("human", "{question}")]
     )
+    sql_plan = state.get("sql_plan")
     chain = template | build_chat_model().with_structured_output(OceanographerAnswer)
     answer = await chain.ainvoke(
         {
             "question": state["question"],
-            "sql": state["sql_plan"].sql if state.get("sql_plan") else "",
+            "sql": sql_plan.sql if sql_plan else "",
             "rows": state.get("rows") or [],
         }
     )
@@ -116,16 +140,17 @@ async def repair_node(state: GraphState) -> dict[str, Any]:
     template = ChatPromptTemplate.from_messages(
         [("system", prompt), ("human", "{question}")]
     )
+    sql_plan = state.get("sql_plan")
     chain = template | build_chat_model().with_structured_output(SqlPlan)
-    sql_plan = await chain.ainvoke(
+    repaired = await chain.ainvoke(
         {
             "question": state["question"],
-            "sql": state["sql_plan"].sql if state.get("sql_plan") else "",
+            "sql": sql_plan.sql if sql_plan else "",
             "errors": state.get("errors", []),
             "schema": SCHEMA_CONTEXT,
         }
     )
-    return {"sql_plan": sql_plan, "attempt": state["attempt"] + 1, "errors": []}
+    return {"sql_plan": repaired, "attempt": state["attempt"] + 1, "errors": []}
 
 
 def _next_after_validation(state: GraphState) -> str:

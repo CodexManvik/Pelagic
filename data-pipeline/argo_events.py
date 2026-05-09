@@ -5,7 +5,7 @@ import random
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
-DEFAULT_MESSAGE_COUNT = 50
+DEFAULT_MESSAGE_COUNT = 100
 DEFAULT_EVENTS_PER_PROFILE = 3
 
 

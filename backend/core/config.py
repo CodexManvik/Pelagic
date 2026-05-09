@@ -27,11 +27,12 @@ class Settings(BaseSettings):
     groq_timeout_seconds: int = Field(default=30, alias="GROQ_TIMEOUT_SECONDS")
 
     sql_allowlist_tables: str = Field(
-        default="floats,profiles,measurements",
+        default="floats,profiles,measurements,active_floats_summary",
         alias="SQL_ALLOWLIST_TABLES",
     )
     sql_max_rows: int = Field(default=500, alias="SQL_MAX_ROWS")
     sql_max_retries: int = Field(default=1, alias="SQL_MAX_RETRIES")
+    sql_max_cost: int = Field(default=1000, alias="SQL_MAX_COST")
 
     measurement_ttl_days: int = Field(default=7, alias="MEASUREMENT_TTL_DAYS")
 

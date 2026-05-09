@@ -11,6 +11,7 @@ Tables:
 - floats(float_id, wmo_id, deployment_date)
 - profiles(profile_id, float_id, cycle_number, profile_date, lat, lon)
 - measurements(id, profile_id, depth, temperature, salinity, oxygen)
+- active_floats_summary(basin, active_float_count, measurement_count, avg_temperature, avg_salinity, last_profile_date)
 
 Relationships:
 - profiles.float_id -> floats.float_id
@@ -18,6 +19,7 @@ Relationships:
 
 Notes:
 - profile_date lives on profiles; join profiles when filtering by time.
+- active_floats_summary is a view for basin-level aggregates over recent profiles.
 """.strip()
 
 
